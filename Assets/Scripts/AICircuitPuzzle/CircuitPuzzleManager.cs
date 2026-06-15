@@ -76,6 +76,10 @@ public class CircuitPuzzleManager : MonoBehaviour
     private bool[] completedExerciseChallenges;
     private LogicGateBlock selectedGate;
 
+    [Header("Mensagem final")]
+    public string successMessage = "Correto!";
+    public string successChallengeText = "";
+
     private void Start()
     {
         ConfigureSceneReferences();
@@ -442,7 +446,16 @@ public class CircuitPuzzleManager : MonoBehaviour
     {
         score += pointsPerSuccess;
         MarkCurrentChallengeCompleted();
-        SetFeedback("Correto!");
+        SetFeedback(successMessage);
+
+        if (!string.IsNullOrEmpty(successChallengeText))
+        {
+            if (challengeText != null)
+                challengeText.text = successChallengeText;
+
+            if (challengeTextMesh != null)
+                challengeTextMesh.text = successChallengeText;
+        }
         UpdateScoreUI();
 
         if (onCorrectAnswer != null)
