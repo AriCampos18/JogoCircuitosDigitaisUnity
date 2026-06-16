@@ -50,6 +50,10 @@ public class CircuitPuzzleManager : MonoBehaviour
     public int lives = 3;
     public int pointsPerSuccess = 10;
     public int pointsLostOnError = 2;
+    public bool showMaxScore;
+    public int maxScore = 50;
+    public bool lockWhenLivesEnd = true;
+    public string noLivesMessage = "Sem vidas. Reinicie a fase.";
     public bool advanceAfterSuccess = true;
 
     [Header("UI")]
@@ -75,6 +79,8 @@ public class CircuitPuzzleManager : MonoBehaviour
     private bool[] completedBuildChallenges;
     private bool[] completedExerciseChallenges;
     private LogicGateBlock selectedGate;
+    private bool interactionsLocked;
+    private Transform searchRoot;
 
     [Header("Mensagem final")]
     public string successMessage = "Correto!";
@@ -90,6 +96,11 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     public void SelectGate(LogicGateBlock gateBlock)
     {
+        if (InteractionsAreLocked())
+        {
+            return;
+        }
+
         if (currentMode != CircuitPuzzleMode.BuildCircuit)
         {
             SetFeedback("Este modo usa resposta 0 ou 1.");
@@ -112,6 +123,11 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     public void PlaceSelectedGate(LogicGateSlot slot)
     {
+        if (InteractionsAreLocked())
+        {
+            return;
+        }
+
         if (currentMode != CircuitPuzzleMode.BuildCircuit)
         {
             return;
@@ -140,6 +156,11 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     public void ValidateCircuit()
     {
+        if (InteractionsAreLocked())
+        {
+            return;
+        }
+
         if (currentChallenge == null)
         {
             SetFeedback("Nenhum desafio ativo.");
@@ -192,6 +213,11 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     public void SelectExerciseAnswer(bool answer)
     {
+        if (InteractionsAreLocked())
+        {
+            return;
+        }
+
         if (currentChallenge == null)
         {
             SetFeedback("Nenhum desafio ativo.");
@@ -254,6 +280,7 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     private void StartMode(CircuitPuzzleMode mode)
     {
+        interactionsLocked = false;
         currentMode = mode;
         UpdateModeVisibility();
         ResetCompletionForMode(currentMode);
@@ -323,7 +350,9 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     private void ConfigureSceneReferences()
     {
-        LogicGateBlock[] gateBlocks = FindObjectsOfType<LogicGateBlock>();
+        searchRoot = transform.parent != null ? transform.parent : transform.root;
+
+        LogicGateBlock[] gateBlocks = FindComponentsInPuzzleScope<LogicGateBlock>();
         for (int i = 0; i < gateBlocks.Length; i++)
         {
             if (gateBlocks[i].puzzleManager == null)
@@ -334,7 +363,7 @@ public class CircuitPuzzleManager : MonoBehaviour
 
         if (slots == null || slots.Length == 0)
         {
-            slots = FindObjectsOfType<LogicGateSlot>();
+            slots = FindComponentsInPuzzleScope<LogicGateSlot>();
         }
 
         SortSlotsByOrder();
@@ -347,7 +376,7 @@ public class CircuitPuzzleManager : MonoBehaviour
             }
         }
 
-        ValidateCircuitButton[] buttons = FindObjectsOfType<ValidateCircuitButton>();
+        ValidateCircuitButton[] buttons = FindComponentsInPuzzleScope<ValidateCircuitButton>();
         for (int i = 0; i < buttons.Length; i++)
         {
             if (buttons[i].puzzleManager == null)
@@ -356,7 +385,7 @@ public class CircuitPuzzleManager : MonoBehaviour
             }
         }
 
-        ExerciseAnswerOption[] answerOptions = FindObjectsOfType<ExerciseAnswerOption>();
+        ExerciseAnswerOption[] answerOptions = FindComponentsInPuzzleScope<ExerciseAnswerOption>();
         for (int i = 0; i < answerOptions.Length; i++)
         {
             if (answerOptions[i].puzzleManager == null)
@@ -445,6 +474,11 @@ public class CircuitPuzzleManager : MonoBehaviour
     private void HandleCorrectAnswer()
     {
         score += pointsPerSuccess;
+        if (showMaxScore)
+        {
+            score = Mathf.Min(score, maxScore);
+        }
+
         MarkCurrentChallengeCompleted();
         SetFeedback(successMessage);
 
@@ -473,7 +507,17 @@ public class CircuitPuzzleManager : MonoBehaviour
     {
         lives = Mathf.Max(0, lives - 1);
         score = Mathf.Max(0, score - pointsLostOnError);
-        SetFeedback("Incorreto. Tente novamente.");
+        if (lives <= 0 && lockWhenLivesEnd)
+        {
+            interactionsLocked = true;
+            ClearSelection();
+            SetFeedback(noLivesMessage);
+        }
+        else
+        {
+            SetFeedback("Incorreto. Tente novamente.");
+        }
+
         UpdateScoreUI();
 
         if (onWrongAnswer != null)
@@ -548,7 +592,7 @@ public class CircuitPuzzleManager : MonoBehaviour
     {
         if (scoreText != null)
         {
-            scoreText.text = "Pontos: " + score;
+            scoreText.text = FormatScoreText();
         }
 
         if (livesText != null)
@@ -558,7 +602,7 @@ public class CircuitPuzzleManager : MonoBehaviour
 
         if (scoreTextMesh != null)
         {
-            scoreTextMesh.text = "Pontos: " + score;
+            scoreTextMesh.text = FormatScoreText();
         }
 
         if (livesTextMesh != null)
@@ -664,7 +708,7 @@ public class CircuitPuzzleManager : MonoBehaviour
                 continue;
             }
 
-            GameObject foundObject = GameObject.Find(objectNames[i]);
+            GameObject foundObject = FindChildObjectInPuzzleScope(objectNames[i]);
             if (foundObject != null && !targetList.Contains(foundObject))
             {
                 targetList.Add(foundObject);
@@ -674,7 +718,74 @@ public class CircuitPuzzleManager : MonoBehaviour
 
     private CircuitPuzzleMode GetRandomMode()
     {
+        bool hasBuildChallenges = buildCircuitChallenges != null && buildCircuitChallenges.Length > 0;
+        bool hasExerciseChallenges = solveExerciseChallenges != null && solveExerciseChallenges.Length > 0;
+
+        if (hasBuildChallenges && !hasExerciseChallenges)
+        {
+            return CircuitPuzzleMode.BuildCircuit;
+        }
+
+        if (!hasBuildChallenges && hasExerciseChallenges)
+        {
+            return CircuitPuzzleMode.SolveExercise;
+        }
+
         return Random.Range(0, 2) == 0 ? CircuitPuzzleMode.BuildCircuit : CircuitPuzzleMode.SolveExercise;
+    }
+
+    private T[] FindComponentsInPuzzleScope<T>() where T : Component
+    {
+        if (searchRoot != null)
+        {
+            T[] scopedComponents = searchRoot.GetComponentsInChildren<T>(true);
+            if (scopedComponents != null && scopedComponents.Length > 0)
+            {
+                return scopedComponents;
+            }
+        }
+
+        return FindObjectsOfType<T>();
+    }
+
+    private GameObject FindChildObjectInPuzzleScope(string objectName)
+    {
+        if (searchRoot == null)
+        {
+            return GameObject.Find(objectName);
+        }
+
+        Transform[] children = searchRoot.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            if (children[i] != null && children[i].name == objectName)
+            {
+                return children[i].gameObject;
+            }
+        }
+
+        return null;
+    }
+
+    private bool InteractionsAreLocked()
+    {
+        if (!interactionsLocked)
+        {
+            return false;
+        }
+
+        SetFeedback(noLivesMessage);
+        return true;
+    }
+
+    private string FormatScoreText()
+    {
+        if (showMaxScore)
+        {
+            return "Pontos: " + score + "/" + maxScore;
+        }
+
+        return "Pontos: " + score;
     }
 
     private CircuitPuzzleChallenge[] GetActiveChallenges()
